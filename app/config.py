@@ -7,7 +7,15 @@ from sqlalchemy.pool import QueuePool
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_SQLITE_PATH = BASE_DIR / "instance" / "store.db"
+
+# The serverless filesystem on Vercel is read-only except for /tmp. When the
+# app falls back to SQLite inside the repo (./instance/store.db) the write fails
+# and the platform reports FUNCTION_INVOCATION_FAILED. Detect that environment
+# and relocate the default DB file into the writable tmp volume.
+if os.getenv("VERCEL"):
+    DEFAULT_SQLITE_PATH = Path("/tmp") / "store.db"
+else:
+    DEFAULT_SQLITE_PATH = BASE_DIR / "instance" / "store.db"
 
 
 def _normalize_database_url(raw_url: Optional[str]) -> str:
