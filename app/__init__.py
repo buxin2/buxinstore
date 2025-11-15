@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, abort, send_file, current_app, json, make_response, send_from_directory
-import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -121,6 +120,27 @@ def get_google_oauth_session():
 _google_openid_config_cache = None
 _google_openid_config_cache_time = None
 GOOGLE_CONFIG_CACHE_TTL = 86400  # 24 hours in seconds
+
+_pandas_module = None
+
+def require_pandas():
+    """Import pandas lazily so the core app can boot even if wheels are missing."""
+    global _pandas_module
+    if _pandas_module is not None:
+        return _pandas_module
+    try:
+        import pandas as pd  # type: ignore
+        _pandas_module = pd
+        return _pandas_module
+    except Exception as exc:
+        try:
+            current_app.logger.error("Pandas import failed: %s", exc)
+        except Exception:
+            logging.getLogger(__name__).error("Pandas import failed before app context: %s", exc)
+        raise RuntimeError(
+            "Spreadsheet import/export features require pandas, but it failed to import "
+            "in this environment. Redeploy with compatible numpy/pandas wheels."
+        ) from exc
 
 def get_google_openid_config():
     """Get Google OpenID configuration with caching and error handling"""
@@ -4146,6 +4166,12 @@ def admin_edit_product(product_id):
 @admin_required
 def admin_bulk_upload():
     if request.method == 'POST':
+        try:
+            pd = require_pandas()
+        except RuntimeError as exc:
+            flash(str(exc), 'error')
+            return redirect(request.url)
+
         if 'file' not in request.files:
             flash('No file selected', 'error')
             return redirect(request.url)
@@ -4611,6 +4637,12 @@ def admin_reupload_missing_files():
 @login_required
 @admin_required
 def download_template():
+    try:
+        pd = require_pandas()
+    except RuntimeError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('admin_products'))
+
     # Create a sample DataFrame
     data = {
         'Product Name': ['Sample Product 1', 'Sample Product 2'],
@@ -5866,6 +5898,12 @@ def admin_shipment_details(shipment_id):
 @admin_required
 def admin_export_shipments():
     """Export shipment records to Excel"""
+    try:
+        pd = require_pandas()
+    except RuntimeError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('admin_order_management', status='submitted_price'))
+
     try:
         shipments = ShipmentRecord.query.order_by(ShipmentRecord.submission_date.desc()).all()
         
